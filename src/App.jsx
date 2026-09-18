@@ -1,293 +1,232 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { getTopic } from './quizData.js'
+import {
+  PHASE_LABELS,
+  STORAGE_KEY,
+  advanceQuestion,
+  answerQuestion,
+  getCurrentQuestion,
+  getProgress,
+  loadStudyState,
+  openCurrentLearning,
+  startNextTopic,
+} from './studyState.js'
 
-const QUIZZES = [
-  { id: 'math5', emoji: '🔢', label: '초5 수학 퀴즈' },
-  { id: 'proverb1', emoji: '📖', label: '초1 속담 퀴즈' },
-]
-
-const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
-
-const shuffle = (items) => {
-  const result = [...items]
-  for (let index = result.length - 1; index > 0; index -= 1) {
-    const target = randomInt(0, index)
-    ;[result[index], result[target]] = [result[target], result[index]]
-  }
-  return result
+function Fraction({ whole, numerator, denominator }) {
+  const spoken = `${whole ? `${whole}와 ` : ''}${denominator}분의 ${numerator}`
+  return (
+    <span className="mixed-fraction" role="img" aria-label={spoken}>
+      {whole && <span className="whole-number">{whole}</span>}
+      <span className="vertical-fraction" aria-hidden="true">
+        <span>{numerator}</span>
+        <span>{denominator}</span>
+      </span>
+    </span>
+  )
 }
 
-const gcd = (first, second) => {
-  let a = Math.abs(first)
-  let b = Math.abs(second)
-  while (b) [a, b] = [b, a % b]
-  return a
-}
-
-const lcm = (first, second) => (first * second) / gcd(first, second)
-
-const fractionText = (numerator, denominator) => {
-  const divisor = gcd(numerator, denominator)
-  const reducedNumerator = numerator / divisor
-  const reducedDenominator = denominator / divisor
-  return reducedDenominator === 1
-    ? String(reducedNumerator)
-    : `${reducedNumerator}/${reducedDenominator}`
-}
-
-const makeOptions = (answer, candidates) => {
-  const unique = [String(answer)]
-  candidates.forEach((candidate) => {
-    const value = String(candidate)
-    if (!unique.includes(value)) unique.push(value)
-  })
-  let offset = 1
-  while (unique.length < 4) {
-    const numericAnswer = Number(answer)
-    const fallback = Number.isNaN(numericAnswer)
-      ? `${answer} ${offset}`
-      : String(numericAnswer + offset)
-    if (!unique.includes(fallback)) unique.push(fallback)
-    offset += 1
-  }
-  return shuffle(unique.slice(0, 4))
-}
-
-const createMixedQuestion = () => {
-  const first = randomInt(8, 30)
-  const second = randomInt(2, 9)
-  const third = randomInt(2, 9)
-  const useParentheses = Math.random() < 0.5
-  const answer = useParentheses ? (first + second) * third : first + second * third
-  return {
-    category: '자연수 혼합 계산',
-    prompt: useParentheses
-      ? `(${first} + ${second}) × ${third} = ?`
-      : `${first} + ${second} × ${third} = ?`,
-    answer: String(answer),
-    options: makeOptions(answer, [(first + second) * third, answer + third, answer - second]),
-    explanation: useParentheses
-      ? `괄호 안을 먼저 계산하면 ${first + second} × ${third} = ${answer}예요.`
-      : `곱셈을 먼저 계산하면 ${first} + ${second * third} = ${answer}예요.`,
-  }
-}
-
-const createDivisorQuestion = () => {
-  const common = randomInt(2, 8)
-  const firstFactor = randomInt(2, 5)
-  let secondFactor = randomInt(2, 5)
-  while (secondFactor === firstFactor) secondFactor = randomInt(2, 5)
-  const first = common * firstFactor
-  const second = common * secondFactor
-  const askGcd = Math.random() < 0.5
-  const answer = askGcd ? gcd(first, second) : lcm(first, second)
-  return {
-    category: '약수와 배수',
-    prompt: `${first}와 ${second}의 ${askGcd ? '최대공약수' : '최소공배수'}는?`,
-    answer: String(answer),
-    options: makeOptions(answer, [common, first * second, answer + common, answer / 2]),
-    explanation: askGcd
-      ? `두 수를 모두 나눌 수 있는 가장 큰 수는 ${answer}예요.`
-      : `두 수에 공통으로 나타나는 가장 작은 배수는 ${answer}예요.`,
-  }
-}
-
-const createFractionQuestion = () => {
-  const firstDenominator = randomInt(3, 9)
-  const secondDenominator = randomInt(3, 9)
-  const firstNumerator = randomInt(1, firstDenominator - 1)
-  const secondNumerator = randomInt(1, secondDenominator - 1)
-  const commonDenominator = lcm(firstDenominator, secondDenominator)
-  const convertedFirst = firstNumerator * (commonDenominator / firstDenominator)
-  const convertedSecond = secondNumerator * (commonDenominator / secondDenominator)
-  const subtract = convertedFirst > convertedSecond && Math.random() < 0.5
-  const resultNumerator = subtract
-    ? convertedFirst - convertedSecond
-    : convertedFirst + convertedSecond
-  const answer = fractionText(resultNumerator, commonDenominator)
-  const candidates = [
-    fractionText(resultNumerator + 1, commonDenominator),
-    fractionText(Math.max(1, resultNumerator - 1), commonDenominator),
-    fractionText(
-      subtract ? Math.abs(firstNumerator - secondNumerator) || 1 : firstNumerator + secondNumerator,
-      firstDenominator + secondDenominator,
-    ),
-    fractionText(resultNumerator + 2, commonDenominator),
-    fractionText(resultNumerator + 3, commonDenominator),
-    fractionText(resultNumerator + 4, commonDenominator),
-  ]
-  return {
-    category: '분수 덧셈·뺄셈',
-    prompt: `${fractionText(firstNumerator, firstDenominator)} ${subtract ? '−' : '+'} ${fractionText(secondNumerator, secondDenominator)} = ?`,
-    answer,
-    options: makeOptions(answer, candidates),
-    explanation: `분모를 ${commonDenominator}(으)로 통분해 계산한 뒤 약분하면 ${answer}예요.`,
-  }
-}
-
-const formatDecimal = (value) => (Math.round(value * 100) / 100).toString()
-
-const createDecimalQuestion = () => {
-  const decimalTenths = randomInt(12, 89)
-  const multiplier = randomInt(2, 9)
-  const decimal = decimalTenths / 10
-  const answer = formatDecimal(decimal * multiplier)
-  return {
-    category: '소수 곱셈',
-    prompt: `${decimal.toFixed(1)} × ${multiplier} = ?`,
-    answer,
-    options: makeOptions(answer, [
-      formatDecimal((decimalTenths * multiplier) / 100),
-      formatDecimal(decimal * multiplier + 0.1),
-      formatDecimal(decimal * multiplier - 1),
-      formatDecimal(decimal + multiplier),
-    ]),
-    explanation: `${decimalTenths} × ${multiplier} = ${decimalTenths * multiplier}에서 소수점을 한 자리 옮기면 ${answer}예요.`,
-  }
-}
-
-const createAreaQuestion = () => {
-  const triangle = Math.random() < 0.5
-  const width = triangle ? randomInt(3, 9) * 2 : randomInt(4, 12)
-  const height = randomInt(3, 10)
-  const answer = triangle ? (width * height) / 2 : width * height
-  return {
-    category: '도형 넓이',
-    prompt: `${triangle ? '밑변' : '가로'} ${width}cm, ${triangle ? '높이' : '세로'} ${height}cm인 ${triangle ? '삼각형' : '직사각형'}의 넓이는?`,
-    answer: `${answer}㎠`,
-    options: makeOptions(`${answer}㎠`, [
-      `${width * height}㎠`, `${width + height}㎠`, `${(width + height) * 2}㎠`, `${answer + height}㎠`,
-    ]),
-    explanation: triangle
-      ? `${width} × ${height} ÷ 2 = ${answer}이므로 넓이는 ${answer}㎠예요.`
-      : `${width} × ${height} = ${answer}이므로 넓이는 ${answer}㎠예요.`,
-  }
-}
-
-const createQuiz = () => shuffle([
-  createMixedQuestion(), createMixedQuestion(),
-  createDivisorQuestion(), createDivisorQuestion(),
-  createFractionQuestion(), createFractionQuestion(),
-  createDecimalQuestion(), createDecimalQuestion(),
-  createAreaQuestion(), createAreaQuestion(),
-])
-
-function App() {
-  const [screen, setScreen] = useState('home')
-  const [notice, setNotice] = useState('')
-  const [questions, setQuestions] = useState([])
-  const [questionIndex, setQuestionIndex] = useState(0)
-  const [score, setScore] = useState(0)
-  const [selectedAnswer, setSelectedAnswer] = useState(null)
-
-  const startQuiz = () => {
-    setQuestions(createQuiz())
-    setQuestionIndex(0)
-    setScore(0)
-    setSelectedAnswer(null)
-    setNotice('')
-    setScreen('quiz')
-  }
-
-  const goHome = () => {
-    setScreen('home')
-    setNotice('')
-  }
-
-  const selectQuiz = (quiz) => {
-    if (quiz.id === 'math5') return startQuiz()
-    setNotice(`'${quiz.label}'는 준비 중이에요.`)
-  }
-
-  const chooseAnswer = (option) => {
-    if (selectedAnswer !== null) return
-    setSelectedAnswer(option)
-    if (option === questions[questionIndex].answer) setScore((current) => current + 1)
-  }
-
-  const nextQuestion = () => {
-    if (questionIndex === questions.length - 1) return setScreen('result')
-    setQuestionIndex((current) => current + 1)
-    setSelectedAnswer(null)
-  }
-
-  if (screen === 'quiz') {
-    const question = questions[questionIndex]
-    const isCorrect = selectedAnswer === question.answer
-    return (
-      <div className="app quiz-page">
-        <main className="quiz-card">
-          <div className="quiz-status">
-            <span>{questionIndex + 1} / {questions.length} 문제</span>
-            <span>점수 {score}점</span>
-          </div>
-          <div className="progress-track" aria-hidden="true">
-            <span style={{ width: `${((questionIndex + 1) / questions.length) * 100}%` }} />
-          </div>
-          <p className="category">{question.category}</p>
-          <h2 className="question-text">{question.prompt}</h2>
-          <div className="answer-grid">
-            {question.options.map((option, index) => {
-              let stateClass = ''
-              if (selectedAnswer !== null) {
-                if (option === question.answer) stateClass = ' correct'
-                else if (option === selectedAnswer) stateClass = ' incorrect'
-              }
-              return (
-                <button key={option} className={`answer-button${stateClass}`}
-                  onClick={() => chooseAnswer(option)} disabled={selectedAnswer !== null}>
-                  <span>{index + 1}</span>{option}
-                </button>
-              )
-            })}
-          </div>
-          {selectedAnswer !== null && (
-            <section className={`feedback ${isCorrect ? 'correct' : 'incorrect'}`} aria-live="polite">
-              <strong>{isCorrect ? '정답이에요! 🎉' : `아쉬워요. 정답은 ${question.answer}예요.`}</strong>
-              <p>{question.explanation}</p>
-              <button className="next-button" onClick={nextQuestion}>
-                {questionIndex === questions.length - 1 ? '결과 보기' : '다음 문제'}
-              </button>
-            </section>
-          )}
-        </main>
-      </div>
+function RichText({ children }) {
+  const text = String(children)
+  const pattern = /\[\[(?:(\d+)\s+)?(\d+)\/(\d+)\]\]/g
+  const parts = []
+  let cursor = 0
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > cursor) parts.push(text.slice(cursor, match.index))
+    parts.push(
+      <Fraction key={`${match.index}-${match[0]}`} whole={match[1] || ''} numerator={match[2]} denominator={match[3]} />,
     )
+    cursor = match.index + match[0].length
   }
+  if (cursor < text.length) parts.push(text.slice(cursor))
+  return parts
+}
 
-  if (screen === 'result') {
-    return (
-      <div className="app result-page">
-        <main className="result-card">
-          <span className="result-emoji">🏆</span>
-          <p>퀴즈 완료!</p>
-          <h1>{questions.length}문제 중 {score}문제 정답</h1>
-          <div className="total-score">총점 <strong>{score * 10}점</strong></div>
-          <div className="result-actions">
-            <button className="primary-action" onClick={startQuiz}>다시 풀기</button>
-            <button className="secondary-action" onClick={goHome}>홈으로</button>
-          </div>
-        </main>
-      </div>
-    )
-  }
+const learningButtonText = (state) => {
+  if (state.phase === 'application_ready') return '2회차 응용 학습 시작'
+  if (state.phase === 'concept_review' || state.phase === 'application_review') return '오답 풀이 이어서'
+  const stage = state.phase.startsWith('application') ? state.application : state.concept
+  return stage.initialIndex > 0 || state.selectedAnswer !== null ? '이어서 학습하기' : '학습 시작'
+}
+
+function Home({ state, updateState }) {
+  const topic = getTopic(state.topicId)
+  const conceptDone = state.phase !== 'concept_initial' && state.phase !== 'concept_review'
+  const applicationStarted = state.phase.startsWith('application') || state.phase === 'complete'
 
   return (
-    <div className="app">
-      <header className="app-header">
+    <div className="app home-page">
+      <header className="app-header compact-header">
         <h1>우리집 퀴즈</h1>
-        <p>풀고 싶은 퀴즈를 골라보세요!</p>
+        <p>요일과 관계없이 현재 단계부터 이어서 학습해요.</p>
       </header>
-      <main className="quiz-select">
-        {QUIZZES.map((quiz) => (
-          <button key={quiz.id} className="quiz-button" onClick={() => selectQuiz(quiz)}>
-            <span className="quiz-emoji">{quiz.emoji}</span>
-            <span>{quiz.label}</span>
+      <main className="dashboard-card">
+        <p className="eyebrow">현재 학습 주제</p>
+        <h2>{topic.name}</h2>
+        <span className={`status-badge ${state.phase}`}>{PHASE_LABELS[state.phase]}</span>
+
+        <div className="learning-route" aria-label="학습 진행 단계">
+          <div className={conceptDone ? 'route-step done' : 'route-step active'}>
+            <strong>1회차</strong>
+            <span>개념 학습</span>
+            <small>{state.concept.initialScore} / 10 최초 정답</small>
+          </div>
+          <span className="route-arrow" aria-hidden="true">→</span>
+          <div className={applicationStarted ? 'route-step active' : 'route-step locked'}>
+            <strong>2회차</strong>
+            <span>응용 학습</span>
+            <small>{applicationStarted ? `${state.application.initialScore} / 10 최초 정답` : '개념 완료 후 열림'}</small>
+          </div>
+        </div>
+
+        {state.phase === 'complete' ? (
+          <button className="primary-action wide-action" onClick={() => updateState({ ...state, view: 'complete' })}>
+            완료 결과 보기
           </button>
-        ))}
+        ) : (
+          <button className="primary-action wide-action" onClick={() => updateState(openCurrentLearning(state))}>
+            {learningButtonText(state)}
+          </button>
+        )}
+        <button className="text-action" onClick={() => updateState({ ...state, view: 'notebook' })}>
+          지난 오답 노트 보기 ({state.history.length})
+        </button>
       </main>
-      {notice && <p className="quiz-notice">{notice}</p>}
     </div>
   )
+}
+
+function Quiz({ state, updateState }) {
+  const question = getCurrentQuestion(state)
+  const progress = getProgress(state)
+  const stageName = state.phase.startsWith('application') ? '2회차 응용 학습' : '1회차 개념 학습'
+  const reviewing = state.phase.endsWith('review')
+  const isCorrect = state.selectedAnswer === question?.answer
+
+  if (!question) return null
+
+  return (
+    <div className="app quiz-page">
+      <main className="quiz-card">
+        <div className="quiz-topline">
+          <button className="back-button" onClick={() => updateState({ ...state, view: 'home' })}>← 홈</button>
+          <span>{getTopic(state.topicId).name} · {stageName}</span>
+        </div>
+        <div className="quiz-status">
+          <span>{reviewing ? `남은 오답 ${state[state.phase.startsWith('application') ? 'application' : 'concept'].wrongIds.length}개` : `${progress.current + (state.selectedAnswer === null ? 1 : 0)} / ${progress.total} 문제`}</span>
+          <span>최초 점수 {state[state.phase.startsWith('application') ? 'application' : 'concept'].initialScore}점</span>
+        </div>
+        <div className="progress-track" aria-hidden="true">
+          <span style={{ width: `${(progress.current / progress.total) * 100}%` }} />
+        </div>
+        {reviewing && <p className="review-label">틀린 문제를 맞힐 때까지 다시 풀어요</p>}
+        <p className="category">{question.category}</p>
+        <h2 className="question-text"><RichText>{question.prompt}</RichText></h2>
+        <div className="answer-grid">
+          {question.options.map((option, index) => {
+            let stateClass = ''
+            if (state.selectedAnswer !== null) {
+              if (option === question.answer) stateClass = ' correct'
+              else if (option === state.selectedAnswer) stateClass = ' incorrect'
+            }
+            return (
+              <button key={option} className={`answer-button${stateClass}`}
+                onClick={() => updateState(answerQuestion(state, option))} disabled={state.selectedAnswer !== null}>
+                <span className="answer-number">{index + 1}</span><RichText>{option}</RichText>
+              </button>
+            )
+          })}
+        </div>
+        {state.selectedAnswer !== null && (
+          <section className={`feedback ${isCorrect ? 'correct' : 'incorrect'}`} aria-live="polite">
+            <strong>
+              {isCorrect ? '정답이에요! 🎉' : <><span>아쉬워요. 정답은 </span><RichText>{question.answer}</RichText><span>입니다.</span></>}
+            </strong>
+            <div className="solution-steps">
+              {question.steps.map((step) => <p key={step}><RichText>{step}</RichText></p>)}
+            </div>
+            <button className="next-button" onClick={() => updateState(advanceQuestion(state))}>
+              {reviewing && !isCorrect ? '이 문제 다시 풀기' : '다음으로'}
+            </button>
+          </section>
+        )}
+      </main>
+    </div>
+  )
+}
+
+function Completion({ state, updateState }) {
+  const topic = getTopic(state.topicId)
+  const totalReviews = state.concept.reviewAttempts + state.application.reviewAttempts
+  return (
+    <div className="app result-page">
+      <main className="result-card completion-card">
+        <span className="result-emoji">🏆</span>
+        <p>이번 주제 학습 완료</p>
+        <h1>{topic.name}</h1>
+        <div className="score-summary">
+          <div><span>개념 최초 점수</span><strong>{state.concept.initialScore}점</strong></div>
+          <div><span>응용 최초 점수</span><strong>{state.application.initialScore}점</strong></div>
+          <div><span>오답 해결 횟수</span><strong>{totalReviews}회</strong></div>
+        </div>
+        <button className="primary-action wide-action" onClick={() => updateState(startNextTopic(state))}>다음 주제 시작</button>
+        <button className="text-action" onClick={() => updateState({ ...state, view: 'notebook' })}>지난 오답 노트 보기</button>
+      </main>
+    </div>
+  )
+}
+
+function Notebook({ state, updateState }) {
+  const history = [...state.history].reverse()
+  const backView = state.phase === 'complete' ? 'complete' : 'home'
+  return (
+    <div className="app notebook-page">
+      <main className="notebook-card">
+        <div className="notebook-header">
+          <div>
+            <p className="eyebrow">학습 기록</p>
+            <h1>오답 노트</h1>
+          </div>
+          <button className="back-button" onClick={() => updateState({ ...state, view: backView })}>← 돌아가기</button>
+        </div>
+        {history.length === 0 ? (
+          <p className="empty-note">아직 저장된 오답이 없습니다.</p>
+        ) : (
+          <div className="mistake-list">
+            {history.map((item) => (
+              <article className="mistake-card" key={item.id}>
+                <div className="mistake-meta">
+                  <span>{item.topicName} · {item.stage === 'concept' ? '개념' : '응용'}</span>
+                  <span className={item.resolved ? 'resolved' : 'unresolved'}>{item.resolved ? '해결 완료' : '복습 중'}</span>
+                </div>
+                <h2><RichText>{item.question}</RichText></h2>
+                <dl>
+                  <div><dt>처음 선택</dt><dd><RichText>{item.firstSelectedAnswer}</RichText></dd></div>
+                  <div><dt>정답</dt><dd><RichText>{item.correctAnswer}</RichText></dd></div>
+                  <div><dt>재도전</dt><dd>{item.retryCount}회</dd></div>
+                </dl>
+                <div className="note-solution">
+                  {item.explanation.map((step) => <p key={step}><RichText>{step}</RichText></p>)}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  )
+}
+
+function App() {
+  const [state, setState] = useState(loadStudyState)
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  }, [state])
+
+  if (state.view === 'quiz') return <Quiz state={state} updateState={setState} />
+  if (state.view === 'complete') return <Completion state={state} updateState={setState} />
+  if (state.view === 'notebook') return <Notebook state={state} updateState={setState} />
+  return <Home state={state} updateState={setState} />
 }
 
 export default App
